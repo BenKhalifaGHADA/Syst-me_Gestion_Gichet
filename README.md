@@ -3,3 +3,8 @@
 cd /frontend => run "npm install" command
 
 cd /backend => run "composer install" command
+
+# Run the applications
+cd /frontend => run "ng serve --o"
+
+cd /backend => run "php artisan serve"
