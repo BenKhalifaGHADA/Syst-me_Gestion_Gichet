@@ -159,6 +159,8 @@ return [
         /*
          * Package Service Providers...
          */
+        Laravel\Sanctum\SanctumServiceProvider::class,
+
 
         /*
          * Application Service Providers...

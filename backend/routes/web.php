@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Http\Response;
 
@@ -21,3 +22,6 @@ Route::get('/', function () {
 
     return new Response($message, 200);
 });
+
+
+
