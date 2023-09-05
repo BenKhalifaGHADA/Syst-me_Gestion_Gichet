@@ -1,141 +1,161 @@
 <?php
-
+    
 namespace App\Http\Controllers;
-
+    
+use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 use App\Models\User;
-use Illuminate\Http\Request;
-use App\Models\Role;
-use Exception;
-use App\Notifications\NewUserNotification;
+use Spatie\Permission\Models\Role;
+//use DB;
+//use Hash;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Mail;
-use Illuminate\Contracts\Mail\Mailable;
+use Illuminate\Support\Facades\Hash as FacadesHash;
+use PDF;
 
 class UserController extends Controller
 {
-    //
+    /**
+     * Display a listing of the resource.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    function __construct()
+    {
+         $this->middleware('permission:user-list|user-create|user-edit|user-delete', ['only' => ['index','show']]);
+         $this->middleware('permission:user-create', ['only' => ['create','store']]);
+         $this->middleware('permission:user-edit', ['only' => ['edit','update']]);
+         $this->middleware('permission:user-delete', ['only' => ['destroy']]);
+    }
+
+    /**
+     * Display a listing of the resource.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function index(Request $request)
+    {
+        $data = User::orderBy('id','DESC')->paginate(5);
+        return view('users.index',compact('data'))
+            ->with('i', ($request->input('page', 1) - 1) * 5);
+    }
+    public function generatePDF()
+    {
+        $users = User::all();
+
+        // Générez le PDF à partir de la vue
+        $pdf = PDF::loadView('users.pdfUser', compact('users'));
+
+        // Téléchargez le PDF 
+        return $pdf->download('liste_utilisateurs.pdf');
+    }
+    
+    /**
+     * Show the form for creating a new resource.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function create()
+    {
+        $roles = Role::pluck('name','name')->all();
+        return view('users.create',compact('roles'));
+    }
+    
+    /**
+     * Store a newly created resource in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
     public function store(Request $request)
     {
-        // Valider les données 
-        //try {
-            $validatedData = $request->validate([
-                'name' => 'required|string|max:255',
-                'email' => 'required|email|unique:users,email',
-                'password' => 'required|string|min:6',
-                'role_id' => 'required|exists:roles,id', // Vérifier que le rôle existe 
-            ]);
-
-
-            // Créer un nouvel utilisateur
-            $user = new User([
-                'name' => $validatedData['name'],
-                'email' => $validatedData['email'],
-                'password' => bcrypt($validatedData['password']),
-            ]);
-
-            // Enregistrer 
-            $user->save();
-
-            // Ajouter le rôle 
-            $user->roles()->attach($validatedData['role_id']);
-
-            $admin = User::whereHas('roles', function ($query) {
-                $query->where('role_id', 1);
-            })->first();
+        $this->validate($request, [
+            'name' => 'required',
+            'email' => 'required|email|unique:users,email',
+            'password' => 'required|same:confirm-password',
+            'roles' => 'required'
+        ]);
     
-            if ($admin) {
-                $admin->notify(new NewUserNotification($user));
-            }
-
-
-
-
-
-            // Retourner une réponse avec le nouvel utilisateur créé
-            return response()->json(['message' => 'Utilisateur créé avec succès', 'user' => $user], 201);
-        // } catch (Exception $e) {
-        //     return response()->json(['message' => $e->getMessage()], 500);
-        //     die($e);
-        // }
+        $input = $request->all();
+        $input['password'] = Hash::make($input['password']);
+    
+        $user = User::create($input);
+        $user->assignRole($request->input('roles'));
+    
+        return redirect()->route('users.index')
+                        ->with('success','User created successfully');
     }
-
-    public function index()
-    {
-        try{
-        // Récupérer tous les utilisateurs avec leurs rôles
-        $users = User::with('roles')->get();
-
-        // Retourner une réponse avec les utilisateurs récupérés
-        return response()->json(['users' => $users], 200);
-        } catch (Exception $e) {
-            return response()->json(['message' => $e->getMessage()], 500);
-            die($e);
-        }
-    }
-
-
+    
+    /**
+     * Display the specified resource.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
     public function show($id)
     {
-        // Récupérer l'utilisateur avec l'ID donné et charger la relation roles
-        $user = User::with('roles')->find($id);
-
-        // Vérifier si l'utilisateur existe dans la base de données
-        if (!$user) {
-            return response()->json(['message' => 'Utilisateur non trouvé'], 404);
-        }
-
-        // Retourner une réponse avec l'utilisateur récupéré
-        return response()->json(['user' => $user], 200);
+        $user = User::find($id);
+        return view('users.show',compact('user'));
     }
-
+    
+    /**
+     * Show the form for editing the specified resource.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function edit($id)
+    {
+        $user = User::find($id);
+        $roles = Role::pluck('name','name')->all();
+        $userRole = $user->roles->pluck('name','name')->all();
+    
+        return view('users.edit',compact('user','roles','userRole'));
+    }
+    
+    /**
+     * Update the specified resource in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
     public function update(Request $request, $id)
     {
-        // Valider les données reçues depuis la requête
-        $validatedData = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:users,email,' . $id,
-            'password' => 'required|string|min:6',
-            'role_id' => 'required|exists:roles,id',
+        $this->validate($request, [
+            'name' => 'required',
+            'email' => 'required|email|unique:users,email,'.$id,
+            'password' => 'same:confirm-password',
+            'roles' => 'required'
         ]);
-
-        // Récupérer l'utilisateur avec l'ID donné
-        $user = User::find($id);
-
-        // Vérifier si l'utilisateur existe dans la base de données
-        if (!$user) {
-            return response()->json(['message' => 'Utilisateur non trouvé'], 404);
+    
+        $input = $request->all();
+        if(!empty($input['password'])){ 
+            $input['password'] = Hash::make($input['password']);
+        }else{
+            $input = Arr::except($input,array('password'));    
         }
-
-        // Mettre à jour les informations de l'utilisateur
-        $user->update([
-            'name' => $validatedData['name'],
-            'email' => $validatedData['email'],
-            'password' => bcrypt($validatedData['password']),
-        ]);
-
-        // Mettre à jour le rôle de l'utilisateur en utilisant la relation définie dans le modèle User
-        $user->roles()->sync([$validatedData['role_id']]);
-
-        // Retourner une réponse avec l'utilisateur mis à jour
-        return response()->json(['message' => 'Utilisateur mis à jour avec succès', 'user' => $user], 200);
+    
+        $user = User::find($id);
+        $user->update($input);
+        DB::table('model_has_roles')->where('model_id',$id)->delete();
+    
+        $user->assignRole($request->input('roles'));
+    
+        return redirect()->route('users.index')
+                        ->with('success','User updated successfully');
     }
-
-
+    
+    /**
+     * Remove the specified resource from storage.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
     public function destroy($id)
     {
-        // Récupérer l'utilisateur avec l'ID donné
-        $user = User::find($id);
-
-        // Vérifier si l'utilisateur existe dans la base de données
-        if (!$user) {
-            return response()->json(['message' => 'Utilisateur non trouvé'], 404);
-        }
-
-        // Supprimer l'utilisateur de la base de données
-        $user->delete();
-
-        // Retourner une réponse indiquant que l'utilisateur a été supprimé avec succès
-        return response()->json(['message' => 'Utilisateur supprimé avec succès'], 200);
+        User::find($id)->delete();
+        return redirect()->route('users.index')->with('success','User deleted successfully');
     }
 }
